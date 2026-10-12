@@ -23,7 +23,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DESIGNCRAFT_REF="${DESIGNCRAFT_REF:-16a7365701f9ce8f93ca77a27a8dc2fffb807869}"
+DESIGNCRAFT_REF="${DESIGNCRAFT_REF:-ca1a8a12bceda169f55f700ae3fbfe034c03c728}"
 SRC="${1:-$APP_DIR/build/designcraft}"
 PATCH="$APP_DIR/patches/designcraft-nextcloud.patch"
 OUT="$APP_DIR/web"
@@ -35,9 +35,12 @@ if [ ! -e "$SRC/.git" ]; then
 fi
 
 if grep -rq 'designcraft:ready' "$SRC/apps/designcraft-web/src"; then
-	echo "bridge patch already applied"
-else
+	echo "DesignCraft has the embedding bridge"
+elif [ -s "$PATCH" ]; then
 	git -C "$SRC" apply "$PATCH"
+else
+	echo "error: this DesignCraft has no embedding bridge, and there is no patch to add it" >&2
+	exit 1
 fi
 
 cargo_args=(build --profile release -p designcraft-web --target wasm32-unknown-unknown --features unbranded)
