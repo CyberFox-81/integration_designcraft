@@ -259,10 +259,10 @@ index fe7cca4..7db97e1 100644
  }
  
 diff --git a/crates/ui-egui/Cargo.toml b/crates/ui-egui/Cargo.toml
-index 8509021..b889359 100644
+index 76b5f89..e5c95cc 100644
 --- a/crates/ui-egui/Cargo.toml
 +++ b/crates/ui-egui/Cargo.toml
-@@ -38,3 +38,8 @@ designcraft-fonts = { workspace = true, features = ["testing"] }
+@@ -39,3 +39,8 @@ designcraft-fonts = { workspace = true, features = ["testing"] }
  [build-dependencies]
  serde_json = { workspace = true }
  toml = "1"
