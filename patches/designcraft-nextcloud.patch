@@ -1,5 +1,5 @@
 diff --git a/apps/designcraft-web/Cargo.toml b/apps/designcraft-web/Cargo.toml
-index b1131c7..b0b7783 100644
+index 1667e69e..62a2bcb1 100644
 --- a/apps/designcraft-web/Cargo.toml
 +++ b/apps/designcraft-web/Cargo.toml
 @@ -14,6 +14,10 @@ workspace = true
@@ -17,14 +17,14 @@ index b1131c7..b0b7783 100644
  wasm-bindgen = "0.2"
  wasm-bindgen-futures = "0.4"
  js-sys = "0.3"
--web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration"] }
-+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "MessageEvent"] }
+-web-sys = { version = "0.3", features = ["Event", "EventTarget", "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration"] }
++web-sys = { version = "0.3", features = ["Event", "EventTarget", "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Location", "CssStyleDeclaration", "MessageEvent"] }
 diff --git a/apps/designcraft-web/src/host.rs b/apps/designcraft-web/src/host.rs
 new file mode 100644
-index 0000000..cc41eed
+index 00000000..eab31461
 --- /dev/null
 +++ b/apps/designcraft-web/src/host.rs
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,137 @@
 +//! The `postMessage` bridge to a same-origin parent page (`?host=parent`), for pages that embed
 +//! DesignCraft in an `<iframe>` (such as a Nextcloud app). Messages are plain objects with a `type`:
 +//!
@@ -75,10 +75,9 @@ index 0000000..cc41eed
 +    pub fn connect(&self, services: &mut Services, inbox: Inbox, ctx: egui::Context) {
 +        self.listen(inbox, ctx);
 +        let bridge = self.clone();
++        // An error fails the save or export, as a refused download does.
 +        services.download = Some(Box::new(move |name: &str, bytes: &[u8]| {
-+            if let Err(e) = bridge.post_save(name, bytes) {
-+                log::error!("couldn't hand {name} to the page: {e}");
-+            }
++            bridge.post_save(name, bytes).map_err(|e| format!("couldn't hand {name} to the page: {e}"))
 +        }));
 +        let bridge = self.clone();
 +        services.write = Some(Box::new(move |name: &str, bytes: &[u8]| bridge.post_save(name, bytes)));
@@ -164,7 +163,7 @@ index 0000000..cc41eed
 +    }
 +}
 diff --git a/apps/designcraft-web/src/main.rs b/apps/designcraft-web/src/main.rs
-index 527baff..e7579a4 100644
+index 1b28064a..1ba0f540 100644
 --- a/apps/designcraft-web/src/main.rs
 +++ b/apps/designcraft-web/src/main.rs
 @@ -12,13 +12,16 @@
@@ -186,10 +185,10 @@ index 527baff..e7579a4 100644
  mod web;
  
 diff --git a/apps/designcraft-web/src/web.rs b/apps/designcraft-web/src/web.rs
-index fe7cca4..7db97e1 100644
+index fe0f4a7f..7be87107 100644
 --- a/apps/designcraft-web/src/web.rs
 +++ b/apps/designcraft-web/src/web.rs
-@@ -47,6 +47,10 @@ pub fn start() {
+@@ -56,6 +56,10 @@ pub fn start() {
          {
              create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
          }
@@ -197,11 +196,11 @@ index fe7cca4..7db97e1 100644
 +        // documents in it and stores what it saves (`host`).
 +        let bridge = if query_param("host").as_deref() == Some("parent") { crate::host::Bridge::new() } else { None };
 +        let app_bridge = bridge.clone();
-         let result = eframe::WebRunner::new()
-             .start(
-                 canvas,
-@@ -56,14 +60,24 @@ pub fn start() {
-                         log::info!("designcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+         let runner = eframe::WebRunner::new();
+         let creator_graphics = graphics.clone();
+         let result = runner
+@@ -72,14 +76,24 @@ pub fn start() {
+                         });
                      }
                      let inbox: Inbox = Inbox::default();
 -                    let mut app = DesignApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
@@ -217,18 +216,18 @@ index fe7cca4..7db97e1 100644
 +                    } else if has_query_flag(&query(), "sample") {
                          let _ = app.run("file.newSample", serde_json::json!({}));
                      }
--                    Ok(Box::new(WebShell { app, inbox }))
-+                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge }))
+-                    Ok(Box::new(WebShell { app, inbox, graphics: creator_graphics }))
++                    Ok(Box::new(WebShell { app, inbox, graphics: creator_graphics, bridge: app_bridge }))
                  }),
              )
              .await;
 +        if let (Err(e), Some(bridge)) = (&result, &bridge) {
 +            bridge.post_failed(&format!("{e:?}"));
 +        }
-         if let Some(el) = document.get_element_by_id(LOADING_ID) {
-             match result {
-                 Ok(()) => el.remove(),
-@@ -77,11 +91,19 @@ fn query() -> String {
+         match result {
+             Ok(()) => {
+                 if let Err(e) = install_recovery_controls(&runner, &canvas, &graphics) {
+@@ -339,12 +353,20 @@ fn query() -> String {
      web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
  }
  
@@ -244,25 +243,26 @@ index fe7cca4..7db97e1 100644
  struct WebShell {
      app: DesignApp,
      inbox: Inbox,
+     graphics: GraphicsState,
 +    bridge: Option<crate::host::Bridge>,
  }
  
  impl eframe::App for WebShell {
-@@ -112,6 +134,9 @@ impl eframe::App for WebShell {
+@@ -380,6 +402,9 @@ impl eframe::App for WebShell {
  
      fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-         self.app.ui(ui);
+         let _ = self.graphics.run_if_healthy(|| self.app.ui(ui));
 +        if let Some(bridge) = &self.bridge {
 +            bridge.sync(&self.app);
 +        }
      }
- }
  
+     fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
 diff --git a/crates/ui-egui/Cargo.toml b/crates/ui-egui/Cargo.toml
-index 76b5f89..e5c95cc 100644
+index c9d85253..2f51cba0 100644
 --- a/crates/ui-egui/Cargo.toml
 +++ b/crates/ui-egui/Cargo.toml
-@@ -39,3 +39,8 @@ designcraft-fonts = { workspace = true, features = ["testing"] }
+@@ -38,3 +38,8 @@ designcraft-fonts = { workspace = true, features = ["testing"] }
  [build-dependencies]
  serde_json = { workspace = true }
  toml = "1"
@@ -272,7 +272,7 @@ index 76b5f89..e5c95cc 100644
 +# (docs/brand/LICENSE-brand.txt).
 +unbranded = []
 diff --git a/crates/ui-egui/src/about.rs b/crates/ui-egui/src/about.rs
-index 4eae2e7..c28675e 100644
+index 14745607..dc6d413e 100644
 --- a/crates/ui-egui/src/about.rs
 +++ b/crates/ui-egui/src/about.rs
 @@ -15,6 +15,7 @@ pub const BRAND: Color32 = Color32::from_rgb(0x4e, 0x7b, 0xfb);

@@ -23,7 +23,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DESIGNCRAFT_REF="${DESIGNCRAFT_REF:-d07cbbe94c2762865eaefeff4ebfd1dbada180a0}"
+DESIGNCRAFT_REF="${DESIGNCRAFT_REF:-b17efb2ddfcd3be55716e4dad66453960f45d394}"
 SRC="${1:-$APP_DIR/build/designcraft}"
 PATCH="$APP_DIR/patches/designcraft-nextcloud.patch"
 OUT="$APP_DIR/web"
